@@ -39,7 +39,7 @@ def rmac(x, L=3, eps=1e-6):
     # region overplus per dimension
     Wd = 0;
     Hd = 0;
-    if H < W:  
+    if H < W:
         Wd = idx.item() + 1
     elif H > W:
         Hd = idx.item() + 1
@@ -61,7 +61,7 @@ def rmac(x, L=3, eps=1e-6):
         else:
             b = (H-wl)/(l+Hd-1)
         cenH = torch.floor(wl2 + torch.Tensor(range(l-1+Hd+1))*b) - wl2 # center coordinates
-            
+
         for i_ in cenH.tolist():
             for j_ in cenW.tolist():
                 if wl == 0:
@@ -91,7 +91,7 @@ def roipool(x, rpool, L=3, eps=1e-6):
     # region overplus per dimension
     Wd = 0;
     Hd = 0;
-    if H < W:  
+    if H < W:
         Wd = idx.item() + 1
     elif H > W:
         Hd = idx.item() + 1
@@ -113,7 +113,7 @@ def roipool(x, rpool, L=3, eps=1e-6):
         else:
             b = (H-wl)/(l+Hd-1)
         cenH = torch.floor(wl2 + torch.Tensor(range(l-1+Hd+1))*b).int() - wl2 # center coordinates
-            
+
         for i_ in cenH.tolist():
             for j_ in cenW.tolist():
                 if wl == 0:
@@ -122,6 +122,17 @@ def roipool(x, rpool, L=3, eps=1e-6):
 
     return torch.cat(vecs, dim=1)
 
+
+def smoothing_avg_pooling(feats, kernel_size):
+    """Smoothing average pooling
+
+    :param torch.Tensor feats: Feature map
+    :param int kernel_size: kernel size of pooling
+    :return torch.Tensor: Smoothend feature map
+    """
+    pad = kernel_size // 2
+    return F.avg_pool2d(feats, (kernel_size, kernel_size), stride=1, padding=pad,
+                        count_include_pad=False)
 
 # --------------------------------------
 # normalization

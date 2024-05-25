@@ -6,8 +6,9 @@ import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 
 import torchvision
+import dino.vision_transformer as vit
 
-from cirtorch.layers.pooling import MAC, SPoC, GeM, GeMmp, RMAC, Rpool
+from cirtorch.layers.pooling import MAC, SPoC, GeM, GeMmp, RMAC, Rpool, SmoothingAvgPooling
 from cirtorch.layers.normalization import L2N, PowerLaw
 from cirtorch.datasets.genericdataset import ImagesFromList
 from cirtorch.utils.general import get_data_root
@@ -18,6 +19,7 @@ FEATURES = {
     'resnet50'      : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/networks/imagenet/imagenet-caffe-resnet50-features-ac468af.pth',
     'resnet101'     : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/networks/imagenet/imagenet-caffe-resnet101-features-10a101d.pth',
     'resnet152'     : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/networks/imagenet/imagenet-caffe-resnet152-features-1011020.pth',
+    'dino'          : 'dino_vitbase16_pretrain/dino_vitbase16_pretrain.pth'
 }
 
 # TODO: pre-compute for more architectures and properly test variations (pre l2norm, post l2norm)
@@ -34,6 +36,7 @@ POOLING = {
     'gem'   : GeM,
     'gemmp' : GeMmp,
     'rmac'  : RMAC,
+    'loc_smooth': SmoothingAvgPooling
 }
 
 # TODO: pre-compute for: resnet50-gem-r, resnet50-mac-r, vgg16-mac-r, alexnet-mac-r
@@ -81,11 +84,12 @@ OUTPUT_DIM = {
     'densenet161'           : 2208, # largest densenet
     'squeezenet1_0'         :  512,
     'squeezenet1_1'         :  512,
+    'dino'                  :  768,
 }
 
 
 class ImageRetrievalNet(nn.Module):
-    
+
     def __init__(self, features, lwhiten, pool, whiten, meta):
         super(ImageRetrievalNet, self).__init__()
         self.features = nn.Sequential(*features)
@@ -94,8 +98,9 @@ class ImageRetrievalNet(nn.Module):
         self.whiten = whiten
         self.norm = L2N()
         self.meta = meta
-    
+
     def forward(self, x):
+        import IPython; IPython.embed()
         # x -> features
         o = self.features(x)
 
@@ -156,7 +161,9 @@ def init_network(params):
 
     # loading network from torchvision
     if pretrained:
-        if architecture not in FEATURES:
+        if architecture == 'dino':
+            net_in = vit.__dict__['vit_base'](patch_size=16, num_classes=0)
+        elif architecture not in FEATURES:
             # initialize with network pretrained on imagenet in pytorch
             net_in = getattr(torchvision.models, architecture)(pretrained=True)
         else:
@@ -180,6 +187,8 @@ def init_network(params):
         features.append(nn.ReLU(inplace=True))
     elif architecture.startswith('squeezenet'):
         features = list(net_in.features.children())
+    elif architecture.startswith('dino'):
+        features = list(net_in.children())
     else:
         raise ValueError('Unsupported or unknown architecture: {}!'.format(architecture))
 
@@ -201,13 +210,13 @@ def init_network(params):
 
     else:
         lwhiten = None
-    
+
     # initialize pooling
     if pooling == 'gemmp':
         pool = POOLING[pooling](mp=dim)
     else:
         pool = POOLING[pooling]()
-    
+
     # initialize regional pooling
     if regional:
         rpool = pool
@@ -252,12 +261,12 @@ def init_network(params):
 
     # create meta information to be stored in the network
     meta = {
-        'architecture' : architecture, 
-        'local_whitening' : local_whitening, 
-        'pooling' : pooling, 
-        'regional' : regional, 
-        'whitening' : whitening, 
-        'mean' : mean, 
+        'architecture' : architecture,
+        'local_whitening' : local_whitening,
+        'pooling' : pooling,
+        'regional' : regional,
+        'whitening' : whitening,
+        'mean' : mean,
         'std' : std,
         'outputdim' : dim,
     }
@@ -270,8 +279,12 @@ def init_network(params):
         print(">> {}: for '{}' custom pretrained features '{}' are used"
             .format(os.path.basename(__file__), architecture, os.path.basename(FEATURES[architecture])))
         model_dir = os.path.join(get_data_root(), 'networks')
-        net.features.load_state_dict(model_zoo.load_url(FEATURES[architecture], model_dir=model_dir))
 
+        if architecture == 'dino':
+            state_dict = torch.hub.load_state_dict_from_url(url="https://dl.fbaipublicfiles.com/dino/" + FEATURES['dino'])
+            net.load_state_dict(state_dict, strict=False)
+        else:
+            net.features.load_state_dict(model_zoo.load_url(FEATURES[architecture], model_dir=model_dir))
     return net
 
 
@@ -291,7 +304,6 @@ def extract_vectors(net, images, image_size, transform, bbxs=None, ms=[1], msp=1
         vecs = torch.zeros(net.meta['outputdim'], len(images))
         for i, input in enumerate(loader):
             input = input.cuda()
-
             if len(ms) == 1 and ms[0] == 1:
                 vecs[:, i] = extract_ss(net, input)
             else:
@@ -307,16 +319,16 @@ def extract_ss(net, input):
     return net(input).cpu().data.squeeze()
 
 def extract_ms(net, input, ms, msp):
-    
+
     v = torch.zeros(net.meta['outputdim'])
-    
-    for s in ms: 
+
+    for s in ms:
         if s == 1:
             input_t = input.clone()
-        else:    
+        else:
             input_t = nn.functional.interpolate(input, scale_factor=s, mode='bilinear', align_corners=False)
         v += net(input_t).pow(msp).cpu().data.squeeze()
-        
+
     v /= len(ms)
     v = v.pow(1./msp)
     v /= v.norm()
