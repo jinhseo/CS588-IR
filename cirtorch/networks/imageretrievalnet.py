@@ -92,15 +92,20 @@ class ImageRetrievalNet(nn.Module):
 
     def __init__(self, features, lwhiten, pool, whiten, meta):
         super(ImageRetrievalNet, self).__init__()
-        self.features = nn.Sequential(*features)
+        if features.num_features == 768:
+            self.features = features
+            self.pool = nn.Identity()
+        else:
+            self.features = nn.Sequential(*features)
+            self.pool = pool
+        #self.features = nn.Sequential(*features) if features.num_features != 768 else features
         self.lwhiten = lwhiten
-        self.pool = pool
+        #self.pool = pool
         self.whiten = whiten
         self.norm = L2N()
         self.meta = meta
 
     def forward(self, x):
-        import IPython; IPython.embed()
         # x -> features
         o = self.features(x)
 
@@ -188,7 +193,7 @@ def init_network(params):
     elif architecture.startswith('squeezenet'):
         features = list(net_in.features.children())
     elif architecture.startswith('dino'):
-        features = list(net_in.children())
+        features = net_in
     else:
         raise ValueError('Unsupported or unknown architecture: {}!'.format(architecture))
 

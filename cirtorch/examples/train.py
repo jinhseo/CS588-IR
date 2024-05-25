@@ -467,7 +467,7 @@ def test(datasets, net):
         std=net.meta['std']
     )
 
-    if net.meta['architecture']:
+    if net.meta['architecture'] == 'dino':
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Resize((224,224)),
